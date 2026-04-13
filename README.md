@@ -21,6 +21,7 @@ git clone https://github.com/Ilshat-collab/predictive_maintenance_project.git
  pip install -r requirements.txt
 3. Запустите приложение:
  streamlit run app.py
+```
 ## Структура репозитория
 - `app.py`: Основной файл приложения.
 - `analysis_and_model.py`: Страница с анализом данных и моделью.
