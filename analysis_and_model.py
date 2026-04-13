@@ -3,190 +3,219 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import LabelEncoder, StandardScaler
-from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import train_test_split, StratifiedKFold, cross_val_score
+from sklearn.preprocessing import StandardScaler, OneHotEncoder
+from sklearn.compose import ColumnTransformer
+from sklearn.decomposition import PCA
+from sklearn.impute import KNNImputer
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix, f1_score
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.svm import SVC
-from sklearn.metrics import accuracy_score, confusion_matrix, classification_report, roc_auc_score, roc_curve
 import xgboost as xgb
+import catboost as cb
+import lightgbm as lgb
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.utils.data import DataLoader, TensorDataset
+import optuna
+from optuna.samplers import TPESampler
 
-st.set_page_config(page_title="Анализ и модель", layout="wide")
-st.title("📊 Анализ данных и обучение модели")
+st.set_page_config(page_title="Анализ и модель (продвинутая)", layout="wide")
+st.title("🚀 Продвинутый анализ и обучение моделей")
 
-# Инициализация состояния сессии
-if 'best_model' not in st.session_state:
-    st.session_state.best_model = None
-if 'scaler' not in st.session_state:
-    st.session_state.scaler = None
-if 'label_encoder' not in st.session_state:
-    st.session_state.label_encoder = None
-if 'feature_names' not in st.session_state:
-    st.session_state.feature_names = None
-
-# Функция предобработки данных 
-def preprocess_data(df):
-    cols_to_drop = ['UDI', 'Product ID', 'TWF', 'HDF', 'PWF', 'OSF', 'RNF']
-    df = df.drop(columns=[c for c in cols_to_drop if c in df.columns], errors='ignore')
-    df.columns = (df.columns
-                  .str.replace('[', '', regex=False)
-                  .str.replace(']', '', regex=False)
-                  .str.replace(' ', '_'))
-    # Кодирование Type
-    le = LabelEncoder()
-    df['Type'] = le.fit_transform(df['Type'])
-    # Целевая переменная и признаки
-    X = df.drop('Machine_failure', axis=1)
-    y = df['Machine_failure']
-    # Масштабирование числовых признаков 
-    num_features = ['Air_temperature_K', 'Process_temperature_K',
-                    'Rotational_speed_rpm', 'Torque_Nm', 'Tool_wear_min']
-    scaler = StandardScaler()
-    X[num_features] = scaler.fit_transform(X[num_features])
-    return X, y, le, scaler
-# Функция обучения моделей
-def train_models(X_train, y_train, X_test, y_test):
-    models = {
-        'Logistic Regression': LogisticRegression(max_iter=1000, random_state=42),
-        'Random Forest': RandomForestClassifier(n_estimators=100, random_state=42),
-        'XGBoost': xgb.XGBClassifier(n_estimators=100, learning_rate=0.1, random_state=42,
-                                     use_label_encoder=False, eval_metric='logloss'),
-        'SVM': SVC(kernel='linear', probability=True, random_state=42)
-    }
-    results = {}
-    best_auc = -1
-    best_model_name = None
-    best_model_obj = None
-
-    for name, model in models.items():
-        model.fit(X_train, y_train)
-        y_pred = model.predict(X_test)
-        y_proba = model.predict_proba(X_test)[:, 1] if hasattr(model, "predict_proba") else None
-        acc = accuracy_score(y_test, y_pred)
-        auc = roc_auc_score(y_test, y_proba) if y_proba is not None else 0
-        results[name] = {
-            'model': model,
-            'accuracy': acc,
-            'roc_auc': auc,
-            'y_pred': y_pred,
-            'y_proba': y_proba
-        }
-        if auc > best_auc:
-            best_auc = auc
-            best_model_name = name
-            best_model_obj = model
-    return results, best_model_name, best_model_obj
-# Загрузка данных
+# Функция загрузки и подготовки
+@st.cache_data
+def load_and_prepare_data(uploaded_file=None):
+    if uploaded_file is not None:
+        df = pd.read_csv(uploaded_file)
+    else:
+        import os
+        if os.path.exists("data/predictive_maintenance.csv"):
+            df = pd.read_csv("data/predictive_maintenance.csv")
+        else:
+            st.error("Файл данных не найден. Загрузите CSV-файл.")
+            st.stop()
+    failure_types = ['TWF', 'HDF', 'PWF', 'OSF', 'RNF']
+    def get_failure_type(row):
+        for ft in failure_types:
+            if row[ft] == 1:
+                return failure_types.index(ft) + 1
+        return 0
+    df['failure_class'] = df.apply(get_failure_type, axis=1)
+    return df
+# Загрузка данных через интерфейс
 uploaded_file = st.file_uploader("📂 Загрузите CSV-файл с данными", type="csv")
 if uploaded_file is not None:
-    df = pd.read_csv(uploaded_file)
+    df = load_and_prepare_data(uploaded_file)
     st.success("Файл успешно загружен!")
-    with st.expander("Показать первые строки данных"):
-        st.dataframe(df.head())
 else:
     import os
-    default_path = "data/predictive_maintenance.csv"
-    if os.path.exists(default_path):
-        df = pd.read_csv(default_path)
-        st.info(f"Используются данные из файла {default_path}")
-        with st.expander("Показать первые строки данных"):
-            st.dataframe(df.head())
+    if os.path.exists("data/predictive_maintenance.csv"):
+        df = load_and_prepare_data()
+        st.info("Используются данные из папки data/")
     else:
-        st.warning("Пожалуйста, загрузите CSV-файл.")
+        st.warning("Пожалуйста, загрузите CSV-файл или поместите файл в data/predictive_maintenance.csv")
         st.stop()
-# Кнопка обучения моделей
-if st.button("🚀 Обучить модели", type="primary"):
-    with st.spinner("Идёт предобработка и обучение..."):
-        X, y, le, scaler = preprocess_data(df)
-        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
-        # Сохраняем объекты для предсказания
-        st.session_state.scaler = scaler
-        st.session_state.label_encoder = le
-        st.session_state.feature_names = X.columns.tolist()
-        # Обучение
-        results, best_name, best_model = train_models(X_train, y_train, X_test, y_test)
-        st.session_state.best_model = best_model
-        st.session_state.results = results
-        st.session_state.best_name = best_name
-        st.session_state.X_test = X_test
-        st.session_state.y_test = y_test
-    st.success(f"✅ Обучение завершено! Лучшая модель: **{best_name}**")
-    # Отображение метрик
-    st.subheader("📈 Сравнение моделей")
-    metrics_df = pd.DataFrame({
-        'Модель': list(results.keys()),
-        'Accuracy': [results[m]['accuracy'] for m in results],
-        'ROC-AUC': [results[m]['roc_auc'] for m in results]
-    }).round(4)
-    st.dataframe(metrics_df)
-    # Лучшая модель: отчёт
-    st.subheader(f"🏆 Лучшая модель: {best_name}")
-    best_res = results[best_name]
-    st.write(f"**Accuracy:** {best_res['accuracy']:.4f}")
-    st.write(f"**ROC-AUC:** {best_res['roc_auc']:.4f}")
-    # Матрица ошибок
-    st.subheader("Confusion Matrix")
-    cm = confusion_matrix(y_test, best_res['y_pred'])
+st.write("Мультиклассовая цель: 0 – нет отказа, 1..5 – тип отказа")
+
+st.header("Предобработка данных")
+handle_outliers = st.checkbox("Обработать выбросы (IQR)", value=True)
+use_pca = st.checkbox("Применить PCA (уменьшение размерности до 5 компонент)", value=False)
+impute_missing = st.checkbox("Применить KNN Imputer (заполнение пропусков)", value=False)
+# Определяем признаки
+numeric_features = ['Air temperature [K]', 'Process temperature [K]',
+                    'Rotational speed [rpm]', 'Torque [Nm]', 'Tool wear [min]']
+categorical_features = ['Type']
+# Исходные данные
+X_raw = df.drop(['failure_class', 'Machine failure', 'UDI', 'Product ID',
+                 'TWF', 'HDF', 'PWF', 'OSF', 'RNF'], axis=1)
+y = df['failure_class']
+# Обработка выбросов
+if handle_outliers:
+    for col in numeric_features:
+        Q1 = X_raw[col].quantile(0.25)
+        Q3 = X_raw[col].quantile(0.75)
+        IQR = Q3 - Q1
+        lower = Q1 - 1.5 * IQR
+        upper = Q3 + 1.5 * IQR
+        X_raw[col] = X_raw[col].clip(lower, upper)
+X_train, X_test, y_train, y_test = train_test_split(X_raw, y, test_size=0.2,
+                                                    random_state=42, stratify=y)
+preprocessor = ColumnTransformer([
+    ('num', StandardScaler(), numeric_features),
+    ('cat', OneHotEncoder(drop='first'), categorical_features)
+])
+X_train_processed = preprocessor.fit_transform(X_train)
+X_test_processed = preprocessor.transform(X_test)
+
+if impute_missing:
+    imputer = KNNImputer(n_neighbors=5)
+    X_train_processed = imputer.fit_transform(X_train_processed)
+    X_test_processed = imputer.transform(X_test_processed)
+# PCA
+if use_pca:
+    pca = PCA(n_components=5)
+    X_train_processed = pca.fit_transform(X_train_processed)
+    X_test_processed = pca.transform(X_test_processed)
+    st.write(f"Размерность после PCA: {X_train_processed.shape[1]}")
+
+st.write(f"Размер обучающей выборки: {X_train_processed.shape}")
+st.write(f"Размер тестовой: {X_test_processed.shape}")
+# 3. Обучение моделей 
+st.header("Обучение моделей")
+models = {
+    "Random Forest": RandomForestClassifier(n_estimators=100, random_state=42),
+    "XGBoost": xgb.XGBClassifier(n_estimators=100, objective='multi:softmax', num_class=6, random_state=42),
+    "CatBoost": cb.CatBoostClassifier(iterations=100, verbose=0, random_state=42),
+    "LightGBM": lgb.LGBMClassifier(n_estimators=100, random_state=42, verbose=-1)
+}
+# Простая нейронная сеть (PyTorch)
+class SimpleNN(nn.Module):
+    def __init__(self, input_dim, num_classes=6):
+        super().__init__()
+        self.fc1 = nn.Linear(input_dim, 64)
+        self.fc2 = nn.Linear(64, 32)
+        self.fc3 = nn.Linear(32, num_classes)
+        self.relu = nn.ReLU()
+        self.dropout = nn.Dropout(0.2)
+    def forward(self, x):
+        x = self.relu(self.fc1(x))
+        x = self.dropout(x)
+        x = self.relu(self.fc2(x))
+        x = self.fc3(x)
+        return x
+
+def train_nn(X_tr, y_tr, X_te, y_te, input_dim):
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = SimpleNN(input_dim).to(device)
+    criterion = nn.CrossEntropyLoss()
+    optimizer = optim.Adam(model.parameters(), lr=0.001)
+    # Преобразование в тензоры
+    X_tr_t = torch.tensor(X_tr.astype(np.float32))
+    y_tr_t = torch.tensor(y_tr.values, dtype=torch.long)
+    X_te_t = torch.tensor(X_te.astype(np.float32))
+    y_te_t = torch.tensor(y_te.values, dtype=torch.long)
+    dataset = TensorDataset(X_tr_t, y_tr_t)
+    loader = DataLoader(dataset, batch_size=32, shuffle=True)
+    epochs = 30
+    for epoch in range(epochs):
+        model.train()
+        for batch_X, batch_y in loader:
+            batch_X, batch_y = batch_X.to(device), batch_y.to(device)
+            optimizer.zero_grad()
+            outputs = model(batch_X)
+            loss = criterion(outputs, batch_y)
+            loss.backward()
+            optimizer.step()
+    model.eval()
+    with torch.no_grad():
+        outputs = model(X_te_t.to(device))
+        _, pred = torch.max(outputs, 1)
+        acc = (pred.cpu().numpy() == y_te).mean()
+    return model, acc
+
+if st.button("🚀 Обучить все модели"):
+    results = {}
+    # Обучение классических моделей
+    for name, model in models.items():
+        model.fit(X_train_processed, y_train)
+        y_pred = model.predict(X_test_processed)
+        acc = accuracy_score(y_test, y_pred)
+        f1 = f1_score(y_test, y_pred, average='weighted')
+        results[name] = {'accuracy': acc, 'f1': f1, 'model': model, 'y_pred': y_pred}
+        st.write(f"**{name}** - Accuracy: {acc:.4f}, F1-weighted: {f1:.4f}")
+    # Обучение нейронных сетей
+    st.write("**Нейронная сеть (PyTorch)**")
+    nn_model, nn_acc = train_nn(X_train_processed, y_train, X_test_processed, y_test, X_train_processed.shape[1])
+    results['Neural Network'] = {'accuracy': nn_acc, 'f1': 0, 'model': nn_model}
+    st.write(f"Accuracy: {nn_acc:.4f}")
+    # Выбор лучшей модели по accuracy
+    best_name = max(results, key=lambda x: results[x]['accuracy'])
+    best_model = results[best_name]['model']
+    best_acc = results[best_name]['accuracy']
+    st.success(f"Лучшая модель: **{best_name}** с Accuracy {best_acc:.4f}")
+    # Матрица ошибок для лучшей модели
+    if best_name != 'Neural Network':
+        y_pred_best = results[best_name]['y_pred']
+    else:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        X_test_t = torch.tensor(X_test_processed.astype(np.float32)).to(device)
+        best_model.eval()
+        with torch.no_grad():
+            outputs = best_model(X_test_t)
+            _, y_pred_best = torch.max(outputs, 1)
+            y_pred_best = y_pred_best.cpu().numpy()
+    cm = confusion_matrix(y_test, y_pred_best)
     fig, ax = plt.subplots()
     sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', ax=ax)
-    ax.set_xlabel('Предсказано')
-    ax.set_ylabel('Истина')
+    ax.set_xlabel("Предсказано")
+    ax.set_ylabel("Истина")
     st.pyplot(fig)
-    # Classification report
     st.subheader("Classification Report")
-    report = classification_report(y_test, best_res['y_pred'], output_dict=True)
+    report = classification_report(y_test, y_pred_best, output_dict=True)
     st.dataframe(pd.DataFrame(report).transpose().round(4))
-    # ROC-кривые всех моделей
-    st.subheader("ROC-кривые")
-    fig2, ax2 = plt.subplots()
-    for name, res in results.items():
-        if res['y_proba'] is not None:
-            fpr, tpr, _ = roc_curve(y_test, res['y_proba'])
-            ax2.plot(fpr, tpr, label=f"{name} (AUC={res['roc_auc']:.3f})")
-    ax2.plot([0, 1], [0, 1], 'k--', label='Случайный')
-    ax2.set_xlabel('False Positive Rate')
-    ax2.set_ylabel('True Positive Rate')
-    ax2.legend()
-    st.pyplot(fig2)
-# Блок предсказания для новых данных
-st.header("🔮 Предсказание по новым данным")
-if st.session_state.best_model is not None:
-    st.write("Введите значения признаков (в оригинальных единицах):")
-    with st.form("prediction_form"):
-        col1, col2 = st.columns(2)
-        with col1:
-            product_type = st.selectbox("Тип продукта (Type)", ["L", "M", "H"])
-            air_temp = st.number_input("Air temperature [K]", value=300.0, step=0.1)
-            process_temp = st.number_input("Process temperature [K]", value=310.0, step=0.1)
-        with col2:
-            rotational_speed = st.number_input("Rotational speed [rpm]", value=1500, step=10)
-            torque = st.number_input("Torque [Nm]", value=40.0, step=0.1)
-            tool_wear = st.number_input("Tool wear [min]", value=100, step=1)
-        submitted = st.form_submit_button("📌 Предсказать")
-        if submitted:
-            # Используем те же имена, что и после переименования
-            input_dict = {
-                'Type': [product_type],
-                'Air_temperature_K': [air_temp],
-                'Process_temperature_K': [process_temp],
-                'Rotational_speed_rpm': [rotational_speed],
-                'Torque_Nm': [torque],
-                'Tool_wear_min': [tool_wear]
-            }
-            input_df = pd.DataFrame(input_dict)
-            # Кодируем Type
-            input_df['Type'] = st.session_state.label_encoder.transform(input_df['Type'])
-            # Масштабируем числовые признаки
-            num_features = ['Air_temperature_K', 'Process_temperature_K',
-                            'Rotational_speed_rpm', 'Torque_Nm', 'Tool_wear_min']
-            input_df[num_features] = st.session_state.scaler.transform(input_df[num_features])
-            # Предсказание
-            pred = st.session_state.best_model.predict(input_df)[0]
-            proba = st.session_state.best_model.predict_proba(input_df)[0][1]
-            st.write("### Результат:")
-            if pred == 1:
-                st.error(f"⚠️ Отказ оборудования **предсказан** (вероятность отказа: {proba:.2f})")
-            else:
-                st.success(f"✅ Отказ оборудования **не предсказан** (вероятность отказа: {proba:.2f})")
-else:
-    st.info("Сначала обучите модель, нажав кнопку выше.")
+# 4. Оптимизация гиперпараметров с Optuna 
+st.header("Оптимизация гиперпараметров (Optuna)")
+if st.button("🔧 Запустить оптимизацию для Random Forest"):
+    def objective(trial):
+        params = {
+            'n_estimators': trial.suggest_int('n_estimators', 50, 300),
+            'max_depth': trial.suggest_int('max_depth', 5, 30),
+            'min_samples_split': trial.suggest_int('min_samples_split', 2, 20),
+            'min_samples_leaf': trial.suggest_int('min_samples_leaf', 1, 10)
+        }
+        model = RandomForestClassifier(**params, random_state=42, n_jobs=-1)
+        skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+        scores = cross_val_score(model, X_train_processed, y_train, cv=skf, scoring='accuracy')
+        return scores.mean()
+
+    study = optuna.create_study(direction='maximize', sampler=TPESampler())
+    study.optimize(objective, n_trials=20, show_progress_bar=True)
+    st.write("Лучшие гиперпараметры:", study.best_params)
+    st.write("Лучшая accuracy (CV):", study.best_value)
+
+    best_rf = RandomForestClassifier(**study.best_params, random_state=42)
+    best_rf.fit(X_train_processed, y_train)
+    y_pred_opt = best_rf.predict(X_test_processed)
+    acc_opt = accuracy_score(y_test, y_pred_opt)
+    st.write(f"Точность на тесте после оптимизации: {acc_opt:.4f}")
