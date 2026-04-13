@@ -20,5 +20,5 @@
 
 # 1. Клонируйте репозиторий
 ```bash
-git clone 
+git clone https://github.com/Ilshat-collab/predictive_maintenance_project.git
 cd predictive_maintenance_project
