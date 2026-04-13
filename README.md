@@ -19,7 +19,7 @@ git clone https://github.com/Ilshat-collab/predictive_maintenance_project.git
 
 Установите зависимости:
  pip install -r requirements.txt
-3. Запустите приложение:
+Запустите приложение:
  streamlit run app.py
 ```
 ## Структура репозитория
@@ -31,5 +31,5 @@ git clone https://github.com/Ilshat-collab/predictive_maintenance_project.git
 - `data/`: Папка с данными.
 - `README.md`: Описание проекта.
 ## Видео-демонстрация
-[Ссылка на видео](video/demo.mp4) или встроенное видео ниже:
+[Ссылка на видео](video/demo.mp4)
 <video src="video/demo.mp4" controls width="100%"></video>
