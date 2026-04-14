@@ -31,5 +31,5 @@ git clone https://github.com/Ilshat-collab/predictive_maintenance_project.git
 - `data/`: Папка с данными.
 - `README.md`: Описание проекта.
 ## Видео-демонстрация
-[Ссылка на видео](video/demo.mp4)
-<video src="video/demo.mp4" controls width="100%"></video>
+[Ссылка на видео](video/dem.mp4)
+<video src="video/dem.mp4" controls width="100%"></video>
